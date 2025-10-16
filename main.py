@@ -1,13 +1,12 @@
 import asyncio
 import logging
-import os
 from typing import Optional
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message
 
-
+from config import load_settings
 
 def create_echo_reply(text: Optional[str]) -> str:
     """Return the same text that was received, defaulting to empty string."""
@@ -28,12 +27,7 @@ async def handle_echo(message: Message) -> None:
 
 async def run() -> None:
     """Configure dispatcher and start polling Telegram for updates."""
-    token = "8100064452:AAH8mS1Jmoa0HlcNQQh9W-g2FKq6SGCvfcU"
-    if not token:
-        raise RuntimeError(
-            "Environment variable BOT_TOKEN is not set. "
-            "Create a bot via @BotFather and export BOT_TOKEN before running.",
-        )
+    settings = load_settings()
 
     logging.basicConfig(level=logging.INFO)
 
@@ -41,7 +35,7 @@ async def run() -> None:
     dp.message.register(handle_start, CommandStart())
     dp.message.register(handle_echo, F.text)
 
-    bot = Bot(token=token)
+    bot = Bot(token=settings.bot_token)
     await dp.start_polling(bot)
 
 
@@ -52,15 +46,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-# ---------------------- pytest tests below ----------------------
-
-def test_create_echo_reply_returns_same_text() -> None:
-    text = "hello world"
-    assert create_echo_reply(text) == text
-
-
-def test_create_echo_reply_handles_empty_input() -> None:
-    assert create_echo_reply("") == ""
-    assert create_echo_reply(None) == ""

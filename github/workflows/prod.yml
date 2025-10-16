@@ -83,6 +83,12 @@ jobs:
     name: Bump Version
     needs: run-tests
     runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump_version.outputs.new_version }}
+      changed: ${{ steps.bump_version.outputs.changed }}
+      branch: ${{ steps.bump_version.outputs.branch }}
+      bump_type: ${{ steps.bump_version.outputs.bump_type }}
+      target_ref: ${{ steps.bump_version.outputs.target_ref }}
     permissions:
       contents: write
       pull-requests: write
@@ -97,12 +103,34 @@ jobs:
         id: bump_version
         run: |
           set -euo pipefail
-          branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          trig_branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
           target_ref="${GITHUB_REF_NAME:-${GITHUB_HEAD_REF}}"
           if [[ -z "$target_ref" ]]; then
-            target_ref="$branch"
+            target_ref="$trig_branch"
           fi
-          echo "Detected branch: ${branch}"
+          source_branch="$trig_branch"
+          mapfile -t containing < <(
+            { git branch -r --contains HEAD 2>/dev/null | sed 's/^[[:space:]]*//'; } || true
+          )
+          for remote in "${containing[@]}"; do
+            name="${remote#origin/}"
+            if [[ "$name" == "HEAD -> "* ]]; then
+              continue
+            fi
+            if [[ "$name" == "prod" || "$name" == "$trig_branch" ]]; then
+              continue
+            fi
+            if [[ "$name" == "main" ]]; then
+              source_branch="main"
+              break
+            fi
+            if [[ "$name" == hotfix/* ]]; then
+              source_branch="$name"
+              break
+            fi
+          done
+          echo "Trigger branch: ${trig_branch}"
+          echo "Detected source branch: ${source_branch}"
           echo "Target ref: ${target_ref}"
           if [[ ! -f version ]]; then
             echo "Version file not found." >&2
@@ -117,17 +145,17 @@ jobs:
           new_version="$major.$minor.$patch"
           bump_type="none"
           changed="false"
-          if [[ "$branch" == "main" ]]; then
+          if [[ "$source_branch" == "main" ]]; then
             minor=$((minor + 1))
             patch=0
             new_version="$major.$minor.$patch"
             bump_type="minor"
-          elif [[ "$branch" == hotfix/* ]]; then
+          elif [[ "$source_branch" == hotfix/* ]]; then
             patch=$((patch + 1))
             new_version="$major.$minor.$patch"
             bump_type="patch"
           else
-            echo "Branch ${branch} does not require a version bump."
+            echo "Branch ${source_branch} does not require a version bump."
           fi
           if [[ "$new_version" != "$current_version" ]]; then
             echo "$new_version" > version
@@ -148,8 +176,9 @@ jobs:
           {
             echo "new_version=$new_version"
             echo "changed=$changed"
-            echo "branch=$branch"
+            echo "branch=$source_branch"
             echo "bump_type=$bump_type"
+            echo "target_ref=$target_ref"
           } >> "$GITHUB_OUTPUT"
 
       - name: Apply release label to associated PRs
@@ -209,6 +238,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    env:
+      SOURCE_BRANCH: ${{ needs.bump-version.outputs.branch }}
+      TARGET_REF: ${{ needs.bump-version.outputs.target_ref }}
 
     steps:
       - name: Checkout repository
@@ -227,10 +259,10 @@ jobs:
           DESCRIPTION_PATH: scripts/changelog/description.txt
         run: |
           set -euo pipefail
-          branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
-          target_ref="${GITHUB_REF_NAME:-${GITHUB_HEAD_REF}}"
+          branch="${SOURCE_BRANCH:-${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}}"
+          target_ref="${TARGET_REF:-${GITHUB_REF_NAME:-${GITHUB_HEAD_REF}}}"
           if [[ -z "$target_ref" ]]; then
-            target_ref="$branch"
+            target_ref="${GITHUB_REF_NAME:-${GITHUB_HEAD_REF:-$branch}}"
           fi
           echo "Detected branch: ${branch}"
           echo "Target ref: ${target_ref}"

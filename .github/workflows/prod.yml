@@ -1,0 +1,415 @@
+name: Prod Pipeline
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - prod
+
+jobs:
+  run-tests:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pytest suite
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+        run: pytest
+
+      - name: Apply label to associated PRs
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const labelName = 'test passed';
+            const labelColor = '0E8A16';
+            async function ensureLabelExists() {
+              try {
+                await github.rest.issues.getLabel({
+                  ...context.repo,
+                  name: labelName,
+                });
+              } catch (error) {
+                if (error.status === 404) {
+                  await github.rest.issues.createLabel({
+                    ...context.repo,
+                    name: labelName,
+                    color: labelColor,
+                    description: 'Prod pipeline tests succeeded',
+                  });
+                } else {
+                  throw error;
+                }
+              }
+            }
+            await ensureLabelExists();
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              ...context.repo,
+              commit_sha: context.sha,
+            });
+            if (!prs.length) {
+              core.info('No associated pull requests found for this commit.');
+              return;
+            }
+            for (const pr of prs) {
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: pr.number,
+                labels: [labelName],
+              });
+              core.info(`Label "${labelName}" applied to PR #${pr.number}.`);
+            }
+
+
+  bump-version:
+    name: Bump Version
+    needs: run-tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version
+        id: bump_version
+        run: |
+          set -euo pipefail
+          branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          target_ref="${GITHUB_REF_NAME:-${GITHUB_HEAD_REF}}"
+          if [[ -z "$target_ref" ]]; then
+            target_ref="$branch"
+          fi
+          echo "Detected branch: ${branch}"
+          echo "Target ref: ${target_ref}"
+          if [[ ! -f version ]]; then
+            echo "Version file not found." >&2
+            exit 1
+          fi
+          current_version=$(tr -d '\n\r ' < version)
+          if [[ -z "$current_version" ]]; then
+            echo "Version file is empty." >&2
+            exit 1
+          fi
+          IFS='.' read -r major minor patch <<<"$current_version"
+          new_version="$major.$minor.$patch"
+          bump_type="none"
+          changed="false"
+          if [[ "$branch" == "main" ]]; then
+            minor=$((minor + 1))
+            patch=0
+            new_version="$major.$minor.$patch"
+            bump_type="minor"
+          elif [[ "$branch" == hotfix/* ]]; then
+            patch=$((patch + 1))
+            new_version="$major.$minor.$patch"
+            bump_type="patch"
+          else
+            echo "Branch ${branch} does not require a version bump."
+          fi
+          if [[ "$new_version" != "$current_version" ]]; then
+            echo "$new_version" > version
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add version
+            if ! git diff --cached --quiet; then
+              git commit -m "chore: bump version to $new_version"
+              git push origin "HEAD:${target_ref}"
+              echo "Version bumped from $current_version to $new_version ($bump_type)."
+              changed="true"
+            else
+              echo "No changes detected after bump."
+            fi
+          else
+            echo "Version remains $new_version."
+          fi
+          {
+            echo "new_version=$new_version"
+            echo "changed=$changed"
+            echo "branch=$branch"
+            echo "bump_type=$bump_type"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Apply release label to associated PRs
+        if: steps.bump_version.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const newVersion = '${{ steps.bump_version.outputs.new_version }}';
+            if (!newVersion) {
+              core.info('No new version detected, skipping label creation.');
+              return;
+            }
+            const labelName = `release: ${newVersion}`;
+            const labelColor = '0E8A16';
+            async function ensureLabelExists() {
+              try {
+                await github.rest.issues.getLabel({
+                  ...context.repo,
+                  name: labelName,
+                });
+              } catch (error) {
+                if (error.status === 404) {
+                  await github.rest.issues.createLabel({
+                    ...context.repo,
+                    name: labelName,
+                    color: labelColor,
+                    description: `Release ${newVersion}`,
+                  });
+                } else {
+                  throw error;
+                }
+              }
+            }
+            await ensureLabelExists();
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              ...context.repo,
+              commit_sha: context.sha,
+            });
+            if (!prs.length) {
+              core.info('No associated pull requests found for this commit.');
+              return;
+            }
+            for (const pr of prs) {
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: pr.number,
+                labels: [labelName],
+              });
+              core.info(`Label "${labelName}" applied to PR #${pr.number}.`);
+            }
+
+  generate-changelog:
+    name: Generate Changelog
+    needs: bump-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Prepare changelog entry
+        id: changelog
+        env:
+          DESCRIPTION_PATH: scripts/changelog/description.txt
+        run: |
+          set -euo pipefail
+          branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          target_ref="${GITHUB_REF_NAME:-${GITHUB_HEAD_REF}}"
+          if [[ -z "$target_ref" ]]; then
+            target_ref="$branch"
+          fi
+          echo "Detected branch: ${branch}"
+          echo "Target ref: ${target_ref}"
+          if [[ ! -f "version" ]]; then
+            echo "Version file not found." >&2
+            exit 1
+          fi
+          new_version=$(tr -d '\n\r ' < version)
+          if [[ -z "$new_version" ]]; then
+            echo "Version file is empty." >&2
+            exit 1
+          fi
+          hotfix_arg=()
+          if [[ "$branch" == hotfix/* ]]; then
+            hotfix_arg=(--hotfix)
+          fi
+          if [[ ! -s "$DESCRIPTION_PATH" ]]; then
+            echo "Description file is empty. Populate ${DESCRIPTION_PATH} before running the workflow." >&2
+            exit 1
+          fi
+          python scripts/changelog/generate_changelog.py --clear-description-file "${hotfix_arg[@]}"
+          changed="false"
+          if ! git diff --exit-code --quiet changelog.md "$DESCRIPTION_PATH"; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add changelog.md "$DESCRIPTION_PATH"
+            if ! git diff --cached --quiet; then
+              git commit -m "docs: update changelog for ${new_version}"
+              git push origin "HEAD:${target_ref}"
+              changed="true"
+              echo "Changelog updated and pushed for ${new_version}."
+            fi
+          else
+            echo "No changelog updates detected."
+          fi
+          {
+            echo "changed=$changed"
+            echo "branch=$branch"
+            echo "new_version=$new_version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Apply changelog label to associated PRs
+        if: steps.changelog.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const labelName = 'changelog updated';
+            const labelColor = '5319E7';
+            async function ensureLabelExists() {
+              try {
+                await github.rest.issues.getLabel({
+                  ...context.repo,
+                  name: labelName,
+                });
+              } catch (error) {
+                if (error.status === 404) {
+                  await github.rest.issues.createLabel({
+                    ...context.repo,
+                    name: labelName,
+                    color: labelColor,
+                    description: 'Changelog entry generated automatically',
+                  });
+                } else {
+                  throw error;
+                }
+              }
+            }
+            await ensureLabelExists();
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              ...context.repo,
+              commit_sha: context.sha,
+            });
+            if (!prs.length) {
+              core.info('No associated pull requests found for this commit.');
+              return;
+            }
+            for (const pr of prs) {
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: pr.number,
+                labels: [labelName],
+              });
+              core.info(`Label "${labelName}" applied to PR #${pr.number}.`);
+            }
+
+  cleanup-description:
+    name: Cleanup Description
+    needs: generate-changelog
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clear description file
+        id: cleanup
+        run: |
+          set -euo pipefail
+          file="scripts/changelog/description.txt"
+          branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          target_ref="${GITHUB_REF_NAME:-${GITHUB_HEAD_REF}}"
+          if [[ -z "$target_ref" ]]; then
+            target_ref="$branch"
+          fi
+          if [[ ! -f "$file" ]]; then
+            echo "Description file not found, skipping cleanup."
+            changed="false"
+          else
+            if [[ -s "$file" ]]; then
+              : > "$file"
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add "$file"
+              if ! git diff --cached --quiet; then
+                git commit -m "docs: clear changelog description buffer"
+                git push origin "HEAD:${target_ref}"
+                changed="true"
+                echo "Description buffer cleared and changes pushed."
+              else
+                changed="false"
+                echo "No staged changes after cleanup."
+              fi
+            else
+              echo "Description file already empty."
+              changed="false"
+            fi
+          fi
+          {
+            echo "changed=$changed"
+            echo "branch=$branch"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Apply cleanup label to associated PRs
+        if: steps.cleanup.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const labelName = 'description cleared';
+            const labelColor = '0052CC';
+            async function ensureLabelExists() {
+              try {
+                await github.rest.issues.getLabel({
+                  ...context.repo,
+                  name: labelName,
+                });
+              } catch (error) {
+                if (error.status === 404) {
+                  await github.rest.issues.createLabel({
+                    ...context.repo,
+                    name: labelName,
+                    color: labelColor,
+                    description: 'Changelog description buffer cleared',
+                  });
+                } else {
+                  throw error;
+                }
+              }
+            }
+            await ensureLabelExists();
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              ...context.repo,
+              commit_sha: context.sha,
+            });
+            if (!prs.length) {
+              core.info('No associated pull requests found for this commit.');
+              return;
+            }
+            for (const pr of prs) {
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: pr.number,
+                labels: [labelName],
+              });
+              core.info(`Label "${labelName}" applied to PR #${pr.number}.`);
+            }

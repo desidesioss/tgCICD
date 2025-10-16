@@ -109,26 +109,17 @@ jobs:
             target_ref="$trig_branch"
           fi
           source_branch="$trig_branch"
-          mapfile -t containing < <(
-            { git branch -r --contains HEAD 2>/dev/null | sed 's/^[[:space:]]*//'; } || true
-          )
-          for remote in "${containing[@]}"; do
-            name="${remote#origin/}"
-            if [[ "$name" == "HEAD -> "* ]]; then
-              continue
-            fi
-            if [[ "$name" == "prod" || "$name" == "$trig_branch" ]]; then
-              continue
-            fi
-            if [[ "$name" == "main" ]]; then
-              source_branch="main"
-              break
-            fi
-            if [[ "$name" == hotfix/* ]]; then
-              source_branch="$name"
-              break
-            fi
-          done
+          git fetch --no-tags --prune origin "+refs/heads/*:refs/remotes/origin/*"
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main 2>/dev/null; then
+            source_branch="main"
+          else
+            while IFS= read -r remote; do
+              if git merge-base --is-ancestor "$GITHUB_SHA" "$remote" 2>/dev/null; then
+                source_branch="${remote#origin/}"
+                break
+              fi
+            done < <(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/hotfix/*')
+          fi
           echo "Trigger branch: ${trig_branch}"
           echo "Detected source branch: ${source_branch}"
           echo "Target ref: ${target_ref}"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -20,6 +21,12 @@ def parse_args() -> argparse.Namespace:
         nargs="*",
         default=None,
         help="List branches included in release.",
+    )
+    parser.add_argument(
+        "--exclude-branches",
+        nargs="*",
+        default=None,
+        help="Branch names to exclude when auto-discovering branches.",
     )
     parser.add_argument(
         "--date",
@@ -100,13 +107,52 @@ def inject_entry(changelog_text: str, entry: str) -> str:
     return f"{prefix}{entry}{trimmed}"
 
 
+def discover_branches(exclude: set[str]) -> list[str]:
+    """Return repository branches excluding specified ones and special refs."""
+    commands = [
+        ["git", "for-each-ref", "--format=%(refname:short)", "refs/remotes/"],
+        ["git", "branch", "--format=%(refname:short)"],
+    ]
+    seen: list[str] = []
+    for cmd in commands:
+        try:
+            result = subprocess.run(
+                cmd,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except subprocess.CalledProcessError:
+            continue
+        for raw in result.stdout.splitlines():
+            name = raw.strip()
+            if not name:
+                continue
+            if name.startswith("origin/"):
+                name = name.split("/", 1)[1]
+            if name.startswith("remotes/"):
+                name = name.split("/", 1)[1]
+            if name in exclude or name in ("HEAD",):
+                continue
+            if name not in seen:
+                seen.append(name)
+    return seen
+
+
 def main() -> None:
     args = parse_args()
     changelog_path = Path(args.changelog)
     new_version = args.new_version or read_version(Path(args.version_file))
     previous_version = args.previous_version or detect_previous_version(changelog_path)
     release_date = args.date or dt.date.today().isoformat()
-    branches = args.branches or []
+    exclude = {"main", "prod"}
+    if args.exclude_branches:
+        exclude.update(args.exclude_branches)
+    if args.branches is not None:
+        branches = [branch for branch in args.branches if branch not in exclude]
+    else:
+        branches = discover_branches(exclude)
     description_file = Path(args.description_file)
     if description_file.exists():
         description_text = description_file.read_text(encoding="utf-8").strip()

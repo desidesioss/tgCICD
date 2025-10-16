@@ -1,4 +1,4 @@
-name: Manual Pipeline Check
+name: Test Pipeline Check
 
 on:
   workflow_dispatch:
@@ -10,6 +10,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -22,10 +24,8 @@ jobs:
           pip install -r requirements.txt
 
       - name: Generate changelog entry
-        env:
-          BRANCH_LIST: ${{ github.ref_name }}
         run: |
-          python scripts/changelog/generate_changelog.py --branches "$BRANCH_LIST" --clear-description-file
+          python scripts/changelog/generate_changelog.py --clear-description-file
 
       - name: Run tests
         env:

@@ -21,6 +21,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Generate changelog entry
+        env:
+          BRANCH_LIST: ${{ github.ref_name }}
+        run: |
+          python scripts/changelog/generate_changelog.py --branches "$BRANCH_LIST" --clear-description-file
+
       - name: Run tests
         env:
           TG_TOKEN: dummy-token

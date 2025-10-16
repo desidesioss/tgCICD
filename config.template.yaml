@@ -1,0 +1,5 @@
+# Auto-generated config template
+version: "1.0.0"
+branches:
+  - fetch/bot
+  - main

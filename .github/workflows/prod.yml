@@ -368,7 +368,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: Igor/${{ github.event.repository.name }}:${{ needs.bump-version.outputs.new_version }}
+          tags: ${{ format('igor/{0}:{1}', lower(github.event.repository.name), needs.bump-version.outputs.new_version) }}
 
       - name: Apply docker label to associated PRs
         uses: actions/github-script@v7
@@ -380,8 +380,8 @@ jobs:
               core.info('Version is not available, skipping docker label application.');
               return;
             }
-            const repositoryName = context.repo.repo;
-            const imageTag = `Igor/${repositoryName}:${version}`;
+            const repositoryName = context.repo.repo.toLowerCase();
+            const imageTag = `igor/${repositoryName}:${version}`;
             const labelName = 'docker image published';
             const labelColor = '0E8A16';
             async function ensureLabelExists() {

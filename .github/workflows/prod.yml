@@ -47,20 +47,36 @@ jobs:
                   ...context.repo,
                   name: labelName,
                 });
+                return true;
               } catch (error) {
                 if (error.status === 404) {
-                  await github.rest.issues.createLabel({
-                    ...context.repo,
-                    name: labelName,
-                    color: labelColor,
-                    description: 'Prod pipeline tests succeeded',
-                  });
-                } else {
-                  throw error;
+                  try {
+                    await github.rest.issues.createLabel({
+                      ...context.repo,
+                      name: labelName,
+                      color: labelColor,
+                      description: 'Prod pipeline tests succeeded',
+                    });
+                    return true;
+                  } catch (creationError) {
+                    if (creationError.status === 403) {
+                      core.warning(`Insufficient permissions to create label "${labelName}". Skipping step.`);
+                      return false;
+                    }
+                    throw creationError;
+                  }
                 }
+                if (error.status === 403) {
+                  core.warning(`Insufficient permissions to access label "${labelName}". Skipping step.`);
+                  return false;
+                }
+                throw error;
               }
             }
-            await ensureLabelExists();
+            const labelAvailable = await ensureLabelExists();
+            if (!labelAvailable) {
+              return;
+            }
             const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
               ...context.repo,
               commit_sha: context.sha,
@@ -70,12 +86,20 @@ jobs:
               return;
             }
             for (const pr of prs) {
-              await github.rest.issues.addLabels({
-                ...context.repo,
-                issue_number: pr.number,
-                labels: [labelName],
-              });
-              core.info(`Label "${labelName}" applied to PR #${pr.number}.`);
+              try {
+                await github.rest.issues.addLabels({
+                  ...context.repo,
+                  issue_number: pr.number,
+                  labels: [labelName],
+                });
+                core.info(`Label "${labelName}" applied to PR #${pr.number}.`);
+              } catch (error) {
+                if (error.status === 403) {
+                  core.warning(`Insufficient permissions to label PR #${pr.number}, skipping.`);
+                  continue;
+                }
+                throw error;
+              }
             }
 
   bump-version:
@@ -190,20 +214,36 @@ jobs:
                   ...context.repo,
                   name: labelName,
                 });
+                return true;
               } catch (error) {
                 if (error.status === 404) {
-                  await github.rest.issues.createLabel({
-                    ...context.repo,
-                    name: labelName,
-                    color: labelColor,
-                    description: `Release ${newVersion}`,
-                  });
-                } else {
-                  throw error;
+                  try {
+                    await github.rest.issues.createLabel({
+                      ...context.repo,
+                      name: labelName,
+                      color: labelColor,
+                      description: `Release ${newVersion}`,
+                    });
+                    return true;
+                  } catch (creationError) {
+                    if (creationError.status === 403) {
+                      core.warning(`Insufficient permissions to create label "${labelName}". Skipping step.`);
+                      return false;
+                    }
+                    throw creationError;
+                  }
                 }
+                if (error.status === 403) {
+                  core.warning(`Insufficient permissions to access label "${labelName}". Skipping step.`);
+                  return false;
+                }
+                throw error;
               }
             }
-            await ensureLabelExists();
+            const labelAvailable = await ensureLabelExists();
+            if (!labelAvailable) {
+              return;
+            }
             const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
               ...context.repo,
               commit_sha: context.sha,
@@ -213,12 +253,20 @@ jobs:
               return;
             }
             for (const pr of prs) {
-              await github.rest.issues.addLabels({
-                ...context.repo,
-                issue_number: pr.number,
-                labels: [labelName],
-              });
-              core.info(`Label "${labelName}" applied to PR #${pr.number}.`);
+              try {
+                await github.rest.issues.addLabels({
+                  ...context.repo,
+                  issue_number: pr.number,
+                  labels: [labelName],
+                });
+                core.info(`Label "${labelName}" applied to PR #${pr.number}.`);
+              } catch (error) {
+                if (error.status === 403) {
+                  core.warning(`Insufficient permissions to label PR #${pr.number}, skipping.`);
+                  continue;
+                }
+                throw error;
+              }
             }
 
   generate-changelog:
@@ -371,20 +419,36 @@ jobs:
                   ...context.repo,
                   name: labelName,
                 });
+                return true;
               } catch (error) {
                 if (error.status === 404) {
-                  await github.rest.issues.createLabel({
-                    ...context.repo,
-                    name: labelName,
-                    color: labelColor,
-                    description: 'Changelog entry generated automatically',
-                  });
-                } else {
-                  throw error;
+                  try {
+                    await github.rest.issues.createLabel({
+                      ...context.repo,
+                      name: labelName,
+                      color: labelColor,
+                      description: 'Changelog entry generated automatically',
+                    });
+                    return true;
+                  } catch (creationError) {
+                    if (creationError.status === 403) {
+                      core.warning(`Insufficient permissions to create label "${labelName}". Skipping step.`);
+                      return false;
+                    }
+                    throw creationError;
+                  }
                 }
+                if (error.status === 403) {
+                  core.warning(`Insufficient permissions to access label "${labelName}". Skipping step.`);
+                  return false;
+                }
+                throw error;
               }
             }
-            await ensureLabelExists();
+            const labelAvailable = await ensureLabelExists();
+            if (!labelAvailable) {
+              return;
+            }
             const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
               ...context.repo,
               commit_sha: context.sha,
@@ -394,12 +458,20 @@ jobs:
               return;
             }
             for (const pr of prs) {
-              await github.rest.issues.addLabels({
-                ...context.repo,
-                issue_number: pr.number,
-                labels: [labelName],
-              });
-              core.info(`Label "${labelName}" applied to PR #${pr.number}.`);
+              try {
+                await github.rest.issues.addLabels({
+                  ...context.repo,
+                  issue_number: pr.number,
+                  labels: [labelName],
+                });
+                core.info(`Label "${labelName}" applied to PR #${pr.number}.`);
+              } catch (error) {
+                if (error.status === 403) {
+                  core.warning(`Insufficient permissions to label PR #${pr.number}, skipping.`);
+                  continue;
+                }
+                throw error;
+              }
             }
 
   publish-docker-image:
@@ -470,20 +542,36 @@ jobs:
                   ...context.repo,
                   name: labelName,
                 });
+                return true;
               } catch (error) {
                 if (error.status === 404) {
-                  await github.rest.issues.createLabel({
-                    ...context.repo,
-                    name: labelName,
-                    color: labelColor,
-                    description: `Docker image ${imageTag} pushed`,
-                  });
-                } else {
-                  throw error;
+                  try {
+                    await github.rest.issues.createLabel({
+                      ...context.repo,
+                      name: labelName,
+                      color: labelColor,
+                      description: `Docker image ${imageTag} pushed`,
+                    });
+                    return true;
+                  } catch (creationError) {
+                    if (creationError.status === 403) {
+                      core.warning(`Insufficient permissions to create label "${labelName}". Skipping step.`);
+                      return false;
+                    }
+                    throw creationError;
+                  }
                 }
+                if (error.status === 403) {
+                  core.warning(`Insufficient permissions to access label "${labelName}". Skipping step.`);
+                  return false;
+                }
+                throw error;
               }
             }
-            await ensureLabelExists();
+            const labelAvailable = await ensureLabelExists();
+            if (!labelAvailable) {
+              return;
+            }
             const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
               ...context.repo,
               commit_sha: context.sha,
@@ -493,12 +581,20 @@ jobs:
               return;
             }
             for (const pr of prs) {
-              await github.rest.issues.addLabels({
-                ...context.repo,
-                issue_number: pr.number,
-                labels: [labelName],
-              });
-              core.info(`Label "${labelName}" applied to PR #${pr.number} for image ${imageTag}.`);
+              try {
+                await github.rest.issues.addLabels({
+                  ...context.repo,
+                  issue_number: pr.number,
+                  labels: [labelName],
+                });
+                core.info(`Label "${labelName}" applied to PR #${pr.number} for image ${imageTag}.`);
+              } catch (error) {
+                if (error.status === 403) {
+                  core.warning(`Insufficient permissions to label PR #${pr.number}, skipping.`);
+                  continue;
+                }
+                throw error;
+              }
             }
 
   cd-prod:

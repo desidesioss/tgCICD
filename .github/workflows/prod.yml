@@ -363,12 +363,19 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Compute lowercase repo name
+        id: repo_name
+        run: |
+          repo="${{ github.event.repository.name }}"
+          lower=$(echo "$repo" | tr '[:upper:]' '[:lower:]')
+          echo "lower=$lower" >> "$GITHUB_OUTPUT"
+
       - name: Build and push image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ format('igor/{0}:{1}', lower(github.event.repository.name), needs.bump-version.outputs.new_version) }}
+          tags: ${{ format('igor/{0}:{1}', steps.repo_name.outputs.lower, needs.bump-version.outputs.new_version) }}
 
       - name: Apply docker label to associated PRs
         uses: actions/github-script@v7
@@ -380,7 +387,7 @@ jobs:
               core.info('Version is not available, skipping docker label application.');
               return;
             }
-            const repositoryName = context.repo.repo.toLowerCase();
+            const repositoryName = '${{ steps.repo_name.outputs.lower }}';
             const imageTag = `igor/${repositoryName}:${version}`;
             const labelName = 'docker image published';
             const labelColor = '0E8A16';

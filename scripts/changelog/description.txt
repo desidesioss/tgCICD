@@ -1,4 +1,0 @@
-<<<<<<< HEAD
-Смена описания в боте
-=======
->>>>>>> d3dcf8a (docs: update changelog for 1.2.0)

@@ -16,7 +16,11 @@ def create_echo_reply(text: Optional[str]) -> str:
 async def handle_start(message: Message) -> None:
     """Send a friendly greeting when /start is issued."""
     await message.answer(
+<<<<<<< HEAD
         "Я эхо-бот.",
+=======
+        "Я эхо-бот. Пиши а я отвечу",
+>>>>>>> b772b4b (commit)
     )
 
 

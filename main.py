@@ -23,6 +23,7 @@ async def handle_start(message: Message) -> None:
 async def handle_echo(message: Message) -> None:
     """Echo back whatever text message was sent by the user."""
     await message.answer(create_echo_reply(message.text))
+    await message.answer("Кря")
 
 
 async def run() -> None:

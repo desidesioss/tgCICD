@@ -618,13 +618,7 @@ jobs:
           name: changelog-entry
           path: changelog_artifact
 
-      - name: No release detected, skipping notification
-        if: env.BUMP_CHANGED != 'true'
-        run: |
-          echo "Version bump did not occur (changed=${BUMP_CHANGED}). Skipping Telegram notification."
-
       - name: Compose Telegram message
-        if: env.BUMP_CHANGED == 'true'
         env:
           CHAT_ID: ${{ secrets.TG_PROD_CHAT_ID }}
         run: |
@@ -637,13 +631,16 @@ jobs:
           artifact_dir = Path("changelog_artifact")
           info_path = artifact_dir / "release_info.json"
           message_path = artifact_dir / "release_message.txt"
-          if not info_path.exists():
-              raise SystemExit(f"Release info artifact missing: {info_path}")
-          payload = json.loads(info_path.read_text(encoding="utf-8"))
-          version = payload.get("version")
-          description = payload.get("description", "")
+          bump_changed = os.environ.get("BUMP_CHANGED", "").strip()
+          version = os.environ.get("NEW_VERSION", "").strip()
+          description = ""
+          payload = {}
+          if info_path.exists():
+              payload = json.loads(info_path.read_text(encoding="utf-8"))
+              version = payload.get("version", version)
+              description = payload.get("description", "") or ""
           if not version:
-              raise SystemExit("Version is missing in release info artifact.")
+              version = "N/A"
           chat_id = os.environ.get("CHAT_ID", "").strip()
           if not chat_id:
               raise SystemExit("Telegram chat id secret TG_PROD_CHAT_ID is not configured.")
@@ -654,16 +651,18 @@ jobs:
               if description:
                   text = f"{text}\n\n{description}"
           if not text:
-              text = f"Релиз {version}"
+              if bump_changed == 'true':
+                  text = f"Релиз {version}"
+              else:
+                  text = f"Релиз {version}\n\nОбновление задеплоено без изменения версии. Проверьте changelog для деталей."
           Path("payload.json").write_text(
               json.dumps({"chat_id": chat_id, "text": text}, ensure_ascii=False),
               encoding="utf-8",
           )
-          print(f"Prepared Telegram payload for release {version}.")
+          print(f"Prepared Telegram payload for release {version} (changed={bump_changed}).")
           PY
 
       - name: Send Telegram notification
-        if: env.BUMP_CHANGED == 'true'
         env:
           BOT_TOKEN: ${{ secrets.TG_TOKEN }}
         run: |

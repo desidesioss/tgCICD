@@ -618,13 +618,7 @@ jobs:
           name: changelog-entry
           path: changelog_artifact
 
-      - name: No release detected, skipping notification
-        if: env.BUMP_CHANGED != 'true'
-        run: |
-          echo "Version bump did not occur (changed=${BUMP_CHANGED}). Skipping Telegram notification."
-
       - name: Compose Telegram message
-        if: env.BUMP_CHANGED == 'true'
         env:
           CHAT_ID: ${{ secrets.TG_PROD_CHAT_ID }}
         run: |
@@ -669,7 +663,6 @@ jobs:
           PY
 
       - name: Send Telegram notification
-        if: env.BUMP_CHANGED == 'true'
         env:
           BOT_TOKEN: ${{ secrets.TG_TOKEN }}
         run: |

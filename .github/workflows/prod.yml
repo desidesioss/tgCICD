@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - prod
+  pull_request:
+    branches:
+      - prod
 
 jobs:
   run-tests:
@@ -105,6 +108,7 @@ jobs:
   bump-version:
     name: Bump Version
     needs: run-tests
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.bump_version.outputs.new_version }}
@@ -272,6 +276,7 @@ jobs:
   generate-changelog:
     name: Generate Changelog
     needs: bump-version
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -479,6 +484,7 @@ jobs:
     needs:
       - bump-version
       - generate-changelog
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -603,7 +609,7 @@ jobs:
       - bump-version
       - generate-changelog
       - publish-docker-image
-    if: ${{ needs.bump-version.result == 'success' && needs.generate-changelog.result == 'success' && needs.publish-docker-image.result == 'success' }}
+    if: ${{ github.event_name != 'pull_request' && needs.bump-version.result == 'success' && needs.generate-changelog.result == 'success' && needs.publish-docker-image.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

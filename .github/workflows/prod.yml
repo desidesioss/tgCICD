@@ -294,6 +294,69 @@ jobs:
             echo "new_version=$new_version"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Extract changelog metadata
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          changelog_path = Path("changelog.md")
+          if not changelog_path.exists():
+              raise SystemExit("changelog.md not found after generation.")
+          lines = changelog_path.read_text(encoding="utf-8").splitlines()
+          entry_lines: list[str] = []
+          capture = False
+          for line in lines:
+              if not capture:
+                  if line.startswith("## "):
+                      capture = True
+                      entry_lines.append(line)
+                  continue
+              if line.startswith("## "):
+                  break
+              entry_lines.append(line)
+          if not entry_lines:
+              raise SystemExit("Failed to locate latest changelog entry.")
+          header = entry_lines[0]
+          match = re.search(r"(\d+\.\d+\.\d+)", header)
+          if not match:
+              raise SystemExit(f"Unable to parse version from header: {header}")
+          version = match.group(1)
+          description_lines: list[str] = []
+          collecting_description = False
+          for line in entry_lines[1:]:
+              if line.strip() == "### Описание":
+                  collecting_description = True
+                  continue
+              if line.startswith("### "):
+                  collecting_description = False
+              if collecting_description:
+                  description_lines.append(line)
+          description = "\n".join(description_lines).strip()
+          if not description:
+              description = "Описание отсутствует."
+          payload = {"version": version, "description": description}
+          Path("release_info.json").write_text(
+              json.dumps(payload, ensure_ascii=False),
+              encoding="utf-8",
+          )
+          message = f"Релиз {version}"
+          if description:
+              message = f"{message}\n\n{description}"
+          Path("release_message.txt").write_text(message, encoding="utf-8")
+          PY
+
+      - name: Upload changelog artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog-entry
+          path: |
+            release_info.json
+            release_message.txt
+          retention-days: 7
+
       - name: Apply changelog label to associated PRs
         if: steps.changelog.outputs.changed == 'true'
         uses: actions/github-script@v7
@@ -437,3 +500,72 @@ jobs:
               });
               core.info(`Label "${labelName}" applied to PR #${pr.number} for image ${imageTag}.`);
             }
+
+  cd-prod:
+    name: CD Prod Notification
+    needs:
+      - bump-version
+      - generate-changelog
+      - publish-docker-image
+    if: needs.bump-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download changelog artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: changelog-entry
+          path: changelog_artifact
+
+      - name: Compose Telegram message
+        env:
+          CHAT_ID: ${{ secrets.TG_PROD_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          artifact_dir = Path("changelog_artifact")
+          info_path = artifact_dir / "release_info.json"
+          message_path = artifact_dir / "release_message.txt"
+          if not info_path.exists():
+              raise SystemExit(f"Release info artifact missing: {info_path}")
+          payload = json.loads(info_path.read_text(encoding="utf-8"))
+          version = payload.get("version")
+          description = payload.get("description", "")
+          if not version:
+              raise SystemExit("Version is missing in release info artifact.")
+          chat_id = os.environ.get("CHAT_ID", "").strip()
+          if not chat_id:
+              raise SystemExit("Telegram chat id secret TG_PROD_CHAT_ID is not configured.")
+          if message_path.exists():
+              text = message_path.read_text(encoding="utf-8").strip()
+          else:
+              text = f"Релиз {version}"
+              if description:
+                  text = f"{text}\n\n{description}"
+          if not text:
+              text = f"Релиз {version}"
+          Path("payload.json").write_text(
+              json.dumps({"chat_id": chat_id, "text": text}, ensure_ascii=False),
+              encoding="utf-8",
+          )
+          print(f"Prepared Telegram payload for release {version}.")
+          PY
+
+      - name: Send Telegram notification
+        env:
+          BOT_TOKEN: ${{ secrets.TG_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BOT_TOKEN}" ]; then
+            echo "Telegram bot token secret TG_TOKEN is not configured." >&2
+            exit 1
+          fi
+          curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d @payload.json
